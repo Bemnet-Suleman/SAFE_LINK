@@ -1,0 +1,18 @@
+# Build and output
+*.hex
+*.elf
+*.o
+build/
+dist/
+
+# Tooling
+.vscode/
+.idea/
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
