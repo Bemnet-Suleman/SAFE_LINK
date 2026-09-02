@@ -1,0 +1,6 @@
+SAFE_LINK dashboard note:
+- Dashboard is currently in a pre-prototype, operational UI state.
+- Main views implemented: overview, roster, map, alerts, analytics, devices, telemetry history, and settings.
+- The application is being aligned to a civilian group-safety model rather than a military command model.
+- Supabase is the intended backend, and the app expects environment variables for the frontend and API layer.
+- Remaining work: finalize environment setup, verify live backend connectivity, regenerate API clients if needed, and validate end-to-end flow with real telemetry.
