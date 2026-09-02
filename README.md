@@ -69,6 +69,89 @@ See [Roadmap](#roadmap) for how these workstreams lead to a finished product, no
 
 Full rationale, dashboard behavior, and technical implementation for each feature is in the project proposal — see [Documentation](#documentation).
 
+## Dashboard Status and Local Run
+
+The dashboard is the primary operator interface for SAFE_LINK. It is currently in a pre-prototype but functional web-app state and is designed to present the live operational picture for a group or camp while hiding raw telemetry behind a cleaner exception-based view.
+
+### Current dashboard scope
+
+The working dashboard includes:
+
+- Overview with summary cards and live operational health
+- Live participant roster and filtering
+- Tactical map view with location overlays
+- Alert or incident queue with acknowledge/resolve actions
+- Analytics and telemetry trend views
+- Device network status and connectivity tracking
+- Historical telemetry replay and export UI
+- System settings for operation state and session handling
+- A feature coverage panel covering all 11 project requirements
+
+This is a working dashboard shell for a safety operation, not a field-validated deployment system. It is still being refined as the project moves from concept toward a prototype.
+
+### Run the dashboard locally
+
+#### Prerequisites
+
+- Node.js 20+
+- pnpm
+- A Supabase project with URL and keys configured
+
+#### 1) Install workspace dependencies
+
+```bash
+cd dashboard/Organizer-Center
+pnpm install
+```
+
+#### 2) Configure environment variables
+
+For the backend API server:
+
+```bash
+export SUPABASE_URL="https://your-project.supabase.co"
+export SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
+export SUPABASE_ANON_KEY="your-anon-key"
+```
+
+For the frontend dashboard:
+
+```bash
+export VITE_SUPABASE_URL="https://your-project.supabase.co"
+export VITE_SUPABASE_ANON_KEY="your-anon-key"
+```
+
+#### 3) Start the backend
+
+```bash
+cd dashboard/Organizer-Center/artifacts/api-server
+pnpm dev
+```
+
+#### 4) Start the frontend
+
+```bash
+cd dashboard/Organizer-Center/artifacts/sl
+pnpm dev
+```
+
+Then open the dashboard in a browser at the Vite address shown in the terminal, usually:
+
+```text
+http://localhost:5173
+```
+
+### Overall project status
+
+The current stack is:
+
+- Frontend: Vite + React + TypeScript
+- Backend: Express API server
+- Database/auth: Supabase
+- Core goal: show operational safety status for participants and groups instead of raw military-style command tooling
+
+The prototype still needs extra validation around real-world telemetry, environment configuration, generated API client regeneration, and end-to-end workflow checks against a live Supabase project.
+
 ## System Architecture
 
 ```
