@@ -1,4 +1,4 @@
-SAFE_LINK dashboard note:
+Safe Link dashboard note:
 - Dashboard is currently in a pre-prototype, operational UI state.
 - Main views implemented: overview, roster, map, alerts, analytics, devices, telemetry history, and settings.
 - The application is being aligned to a civilian group-safety model rather than a military command model.

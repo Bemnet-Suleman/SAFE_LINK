@@ -41,7 +41,7 @@ SAFE_LINK has not yet reached a working prototype. The following workstreams are
 
 | Workstream | Status |
 |---|---|
-| Organizer dashboard | 🔄 In progress |
+| Organizer dashboard | ✔ Done First phase build |
 | Firmware | 🔄 In progress |
 | Schematic | 🔄 In progress |
 | PCB layout | 🔄 In progress |
@@ -100,7 +100,7 @@ This is a working dashboard shell for a safety operation, not a field-validated 
 #### 1) Install workspace dependencies
 
 ```bash
-cd dashboard/Organizer-Center
+cd dashboard/Organizer-Center/SAFELINK
 pnpm install
 ```
 
@@ -124,14 +124,14 @@ export VITE_SUPABASE_ANON_KEY="your-anon-key"
 #### 3) Start the backend
 
 ```bash
-cd dashboard/Organizer-Center/artifacts/api-server
+cd dashboard/Organizer-Center/SAFELINK/artifacts/api-server
 pnpm dev
 ```
 
 #### 4) Start the frontend
 
 ```bash
-cd dashboard/Organizer-Center/artifacts/sl
+cd dashboard/Organizer-Center/SAFELINK/artifacts/safelink
 pnpm dev
 ```
 
@@ -266,9 +266,9 @@ Work is organized by branch, merged into `main` via pull request:
 - [ ] 🔄 Reference schematic and component selection
 - [ ] 🔄 PCB layout
 - [ ] 🔄 3D enclosure design
-- [ ] 🔄 Organizer dashboard
+- [x] ✔ Organizer dashboard
 - [ ] 🔄 Project documentation
-- [ ] 🔄 Dashboard design and development
+- [x] ✔ Dashboard design and development
 
 ### Phase 1 — First Hardware Prototype
 - [ ] Bring up each subsystem individually (GPS fix, GSM link, IMU, HR sensor, charging)
