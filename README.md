@@ -1,4 +1,4 @@
-# SAFE_LINK
+# Safe Link
 
 **A wearable-based safety and accountability system for organized outdoor groups.**
 
@@ -6,7 +6,7 @@
 ![License](https://img.shields.io/badge/license-MIT-blue)
 ![Platform](https://img.shields.io/badge/platform-ATmega328P-green)
 
-SAFE_LINK gives a small organizing team (camp staff, trip leaders, coaches) the ability to responsibly oversee a group far larger than manual headcounts and radios allow. Each participant wears a compact device; organizers watch a dashboard that surfaces **exceptions**, not raw sensor data.
+Safe Link gives a small organizing team (camp staff, trip leaders, coaches) the ability to responsibly oversee a group far larger than manual headcounts and radios allow. Each participant wears a compact device; organizers watch a dashboard that surfaces **exceptions**, not raw sensor data.
 
 > ⚠️ **Project status: pre-prototype.** No hardware unit has been built and tested end-to-end yet. Nothing described here has been field-validated. This is not a substitute for standard supervision or emergency procedures.
 
@@ -31,17 +31,17 @@ SAFE_LINK gives a small organizing team (camp staff, trip leaders, coaches) the 
 
 ## Overview
 
-SAFE_LINK is an embedded systems project combining a wearable device, firmware, and an organizer-facing dashboard into a single group-safety platform. It targets youth camps, school excursions, hiking and scouting groups, outdoor training programs, and similar settings where a few adults are responsible for many participants across open or obstructed terrain.
+Safe Link is an embedded systems project combining a wearable device, firmware, and an organizer-facing dashboard into a single group-safety platform. It targets youth camps, school excursions, hiking and scouting groups, outdoor training programs, and similar settings where a few adults are responsible for many participants across open or obstructed terrain.
 
 The system is built around one principle: convert raw telemetry (location, motion, connectivity, battery, heart rate) into a small set of operational states — **SAFE, WARNING, CRITICAL, UNKNOWN** — and only ask for an organizer's attention when something changes for the worse.
 
 ## Project Status
 
-SAFE_LINK has not yet reached a working prototype. The following workstreams are active **in parallel**:
+Safe Link has not yet reached a working prototype. The following workstreams are active **in parallel**:
 
 | Workstream | Status |
 |---|---|
-| Organizer dashboard | 🔄 In progress |
+| Organizer dashboard | ✔ Done First phase build |
 | Firmware | 🔄 In progress |
 | Schematic | 🔄 In progress |
 | PCB layout | 🔄 In progress |
@@ -71,7 +71,7 @@ Full rationale, dashboard behavior, and technical implementation for each featur
 
 ## Dashboard Status and Local Run
 
-The dashboard is the primary operator interface for SAFE_LINK. It is currently in a pre-prototype but functional web-app state and is designed to present the live operational picture for a group or camp while hiding raw telemetry behind a cleaner exception-based view.
+The dashboard is the primary operator interface for Safe Link. It is currently in a pre-prototype but functional web-app state and is designed to present the live operational picture for a group or camp while hiding raw telemetry behind a cleaner exception-based view.
 
 ### Current dashboard scope
 
@@ -100,7 +100,7 @@ This is a working dashboard shell for a safety operation, not a field-validated 
 #### 1) Install workspace dependencies
 
 ```bash
-cd dashboard/Organizer-Center
+cd dashboard/Organizer-Center/SAFELINK
 pnpm install
 ```
 
@@ -124,14 +124,14 @@ export VITE_SUPABASE_ANON_KEY="your-anon-key"
 #### 3) Start the backend
 
 ```bash
-cd dashboard/Organizer-Center/artifacts/api-server
+cd dashboard/Organizer-Center/SAFELINK/artifacts/api-server
 pnpm dev
 ```
 
 #### 4) Start the frontend
 
 ```bash
-cd dashboard/Organizer-Center/artifacts/sl
+cd dashboard/Organizer-Center/SAFELINK/artifacts/safelink
 pnpm dev
 ```
 
@@ -196,7 +196,7 @@ The reference schematic (`hardware/`) adapts a design originally created for a *
 ## Repository Structure
 
 ```
-SAFE_LINK/
+Safe Link/
 │── src/          # Firmware source (C, AVR-GCC)
 │── docs/         # Documentation, diagrams, the project proposal
 │── hardware/     # Schematics and PCB layouts (EasyEDA)
@@ -222,8 +222,8 @@ You'll also need [Proteus](https://www.labcenter.com/) and [EasyEDA](https://eas
 ### Clone the repository
 
 ```bash
-git clone https://github.com/<your-org-or-username>/SAFE_LINK.git
-cd SAFE_LINK/src
+git clone https://github.com/<your-org-or-username>/Safe Link.git
+cd Safe Link/src
 ```
 
 ### Build the firmware
@@ -266,9 +266,9 @@ Work is organized by branch, merged into `main` via pull request:
 - [ ] 🔄 Reference schematic and component selection
 - [ ] 🔄 PCB layout
 - [ ] 🔄 3D enclosure design
-- [ ] 🔄 Organizer dashboard
+- [ ] ✔ Organizer dashboard
 - [ ] 🔄 Project documentation
-- [ ] 🔄 Dashboard design and development
+- [ ] ✔ Dashboard design and development
 
 ### Phase 1 — First Hardware Prototype
 - [ ] Bring up each subsystem individually (GPS fix, GSM link, IMU, HR sensor, charging)
