@@ -41,12 +41,13 @@ SAFE_LINK has not yet reached a working prototype. The following workstreams are
 
 | Workstream | Status |
 |---|---|
+| Documentation | ✔ In progress |
 | Organizer dashboard | ✔ Done First phase build |
-| Firmware | 🔄 In progress |
-| Schematic | 🔄 In progress |
+| Schematic | ✔ In progress |
+| Firmware | ✔ In progress |
 | PCB layout | 🔄 In progress |
 | 3D enclosure design | 🔄 In progress |
-| Documentation | 🔄 In progress |
+
 | Testing / prototyping | 🔄 In progress |
 
 See [Roadmap](#roadmap) for how these workstreams lead to a finished product, not just a working prototype.
@@ -166,7 +167,9 @@ ORGANIZER DASHBOARD
 
 ## Hardware
 
-The reference schematic (`hardware/`) adapts a design originally created for a **military wearable**, retargeted here for civilian group/camp-safety use. See [Setting Up This Project](#setting-up-this-project) below (in the chat response) for a note on licensing reused hardware designs.
+The reference schematic in (`hardware/`) adapts a design originally created for a **military wearable**, retargeted here for civilian group/camp-safety use. See [Setting Up This Project](#setting-up-this-project) below (in the chat response) for a note on licensing reused hardware designs.
+For the constrain of the project from SMD prohibition to space constraints, lots of trades of has been made designing both the schematics and PCB. **UPTO DATE SCHEMATICS UNDER (hardware\Schematic_SAFELINK_carrier_2026-10-11); Divided into three schematics, MCU, POWER and PERIPHERALS.
+
 
 | Component | Part | Function |
 |---|---|---|
@@ -197,7 +200,7 @@ The reference schematic (`hardware/`) adapts a design originally created for a *
 
 ```
 SAFE_LINK/
-│── src/          # Firmware source (C, AVR-GCC)
+│── src/          # Firmware source (C, AVR-GCC/Platform IO)
 │── docs/         # Documentation, diagrams, the project proposal
 │── hardware/     # Schematics and PCB layouts (EasyEDA)
 │── simulation/   # Proteus simulation files
@@ -262,12 +265,12 @@ Work is organized by branch, merged into `main` via pull request:
 
 ### Phase 0 — Concept & Design *(current)*
 - [x] Problem definition, feature specification, and system design proposal
-- [ ] 🔄 Firmware architecture and initial drivers
-- [ ] 🔄 Reference schematic and component selection
+- [x] ✔ Firmware architecture and initial drivers
+- [x] ✔ Reference schematic and component selection
 - [ ] 🔄 PCB layout
 - [ ] 🔄 3D enclosure design
 - [x] ✔ Organizer dashboard
-- [ ] 🔄 Project documentation
+- [x] ✔ Project documentation
 - [x] ✔ Dashboard design and development
 
 ### Phase 1 — First Hardware Prototype
