@@ -168,7 +168,7 @@ ORGANIZER DASHBOARD
 ## Hardware
 
 The reference schematic in (`hardware/`) adapts a design originally created for a **military wearable**, retargeted here for civilian group/camp-safety use. See [Setting Up This Project](#setting-up-this-project) below (in the chat response) for a note on licensing reused hardware designs.
-For the constrain of the project from SMD prohibition to space constraints, lots of trades of has been made designing both the schematics and PCB. **UPTO DATE SCHEMATICS UNDER (hardware\Schematic_SAFELINK_carrier_2026-10-11); Divided into three schematics, MCU, POWER and PERIPHERALS.
+For the constrain of the project from SMD prohibition to space constraints, lots of trades of has been made designing both the schematics and PCB. **UPTO DATE SCHEMATICS UNDER** (hardware\Schematic_SAFELINK_carrier_2026-10-11); Divided into three schematics, MCU, POWER and PERIPHERALS.
 
 
 | Component | Part | Function |
