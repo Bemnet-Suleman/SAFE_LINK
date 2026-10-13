@@ -1,0 +1,540 @@
+#define F_CPU 16000000UL
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <util/delay.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+/* ---------- Pin macros ---------- */
+#define PIN_SIM_RST   PD4
+#define PIN_GPS_RX    PD5
+#define PIN_GPS_EN    PD6
+#define PIN_HR_INT    PD7
+#define PIN_VIB       PB0
+#define PIN_BUZ       PB1
+#define PIN_LED       PB2
+#define PIN_SOS       PD3
+#define PIN_IMU_INT   PD2
+
+/* ---------- I2C addresses ---------- */
+#define MPU_ADDR 0x68
+#define MAX_ADDR 0x57
+
+/* ---------- Global state ---------- */
+volatile bool sosPending    = false;
+volatile bool motionPending = false;
+bool     mpuPresent  = false;
+bool     maxPresent  = false;
+bool     modemReady  = false;
+bool     gpsFix      = false;
+float    latitude    = 0.0f;
+float    longitude   = 0.0f;
+uint32_t lastReportMs = 0;
+uint32_t lastGpsMs    = 0;
+char     nmeaLine[96];
+uint8_t  nmeaPos      = 0;
+
+/* Optional organizer number for SMS test. Empty = skip SMS. */
+static const char ORGANIZER_PHONE[] = "";
+
+/* =====================================================================
+   Millis using Timer0 overflow (1 ms tick)
+   ===================================================================== */
+volatile uint32_t g_millis = 0;
+static uint32_t mstick = 0;
+
+ISR(TIMER0_COMPA_vect) {
+  g_millis++;
+}
+
+static void timer0_init(void) {
+  /* CTC mode, prescaler 64 -> 16MHz/64 = 250kHz -> 1ms = 250 ticks */
+  TCCR0A = (1 << WGM01);
+  TCCR0B = (1 << CS01) | (1 << CS00);
+  OCR0A  = 249;
+  TIMSK0 = (1 << OCIE0A);
+}
+
+uint32_t millis(void) { return g_millis; }
+
+/* =====================================================================
+   GPIO helpers
+   ===================================================================== */
+static inline void pinModeOutput(volatile uint8_t *ddr, uint8_t bit) { *ddr |= (1 << bit); }
+static inline void pinModeInput (volatile uint8_t *ddr, uint8_t bit) { *ddr &= ~(1 << bit); }
+static inline void pinHigh(volatile uint8_t *port, uint8_t bit) { *port |=  (1 << bit); }
+static inline void pinLow (volatile uint8_t *port, uint8_t bit) { *port &= ~(1 << bit); }
+static inline bool pinRead(volatile uint8_t *pin, uint8_t bit) { return (*pin & (1 << bit)) != 0; }
+
+/* =====================================================================
+   UART0 (SIM800L) - 9600 8N1 @ 16 MHz
+   ===================================================================== */
+static void uart0_init(void) {
+  UBRR0H = 0;
+  UBRR0L = 103;                 /* 16MHz/(16*9600)-1 = 103.16 */
+  UCSR0B = (1 << RXEN0) | (1 << TXEN0);
+  UCSR0C = (1 << UCSZ01) | (1 << UCSZ00);
+}
+
+static void uart0_putc(char c) {
+  while (!(UCSR0A & (1 << UDRE0))) {}
+  UDR0 = c;
+}
+
+static void uart0_puts(const char *s) {
+  while (*s) uart0_putc(*s++);
+}
+
+static bool uart0_available(void) { return (UCSR0A & (1 << RXC0)) != 0; }
+static char uart0_getc(void) { while (!uart0_available()) {} return UDR0; }
+
+/* =====================================================================
+   Software UART RX on PD5 (bit-bang, 9600 baud, 16 MHz)
+   ===================================================================== */
+#define SOFT_RX_PIN PIND
+#define SOFT_RX_BIT PD5
+
+static bool soft_rx_available = false;
+static uint8_t soft_rx_byte = 0;
+static uint8_t soft_rx_state = 0;      /* 0=idle, 1..8 data, 9=stop */
+static uint8_t soft_rx_bitidx = 0;
+static uint32_t soft_rx_last_edge_us = 0;
+
+/* Use Timer1 for precise bit sampling. 16MHz, prescaler 8 -> 0.5 us/tick.
+   9600 baud -> 104.17 us/bit -> ~208 ticks. */
+static void soft_uart_rx_init(void) {
+  pinModeInput(&DDRD, SOFT_RX_BIT);
+  /* no pull-up - GPS drives it */
+  TCCR1A = 0;
+  TCCR1B = (1 << CS11);   /* prescaler 8 */
+  TCCR1C = 0;
+  /* Start with timer stopped; we'll poll in the main loop */
+}
+
+static bool soft_uart_getc(char *out) {
+  if (!soft_rx_available) return false;
+  *out = (char)soft_rx_byte;
+  soft_rx_available = false;
+  return true;
+}
+
+/* Simple polling bit-bang. Call frequently (e.g. every loop).
+   Detects start bit low, samples at bit center. */
+static void soft_uart_poll(void) {
+  static uint16_t bit_ticks = 0;
+  uint8_t pin = (SOFT_RX_PIN & (1 << SOFT_RX_BIT)) ? 1 : 0;
+
+  if (soft_rx_state == 0) {
+    if (pin == 0) {
+      /* possible start bit - wait half a bit period and re-check */
+      _delay_us(52);
+      if ((SOFT_RX_PIN & (1 << SOFT_RX_BIT)) == 0) {
+        soft_rx_byte = 0;
+        soft_rx_bitidx = 0;
+        soft_rx_state = 1;
+        bit_ticks = 0;
+        _delay_us(104);   /* advance to center of bit 0 */
+      }
+    }
+    return;
+  }
+
+  /* sample data bits */
+  uint8_t b = (SOFT_RX_PIN & (1 << SOFT_RX_BIT)) ? 1 : 0;
+  if (b) soft_rx_byte |= (1 << soft_rx_bitidx);
+  soft_rx_bitidx++;
+  if (soft_rx_bitidx >= 8) {
+    /* sample stop bit */
+    _delay_us(104);
+    soft_rx_available = true;
+    soft_rx_state = 0;
+  } else {
+    _delay_us(104);
+  }
+}
+
+/* =====================================================================
+   I2C (TWI) master @ 100 kHz @ 16 MHz
+   ===================================================================== */
+static void i2c_init(void) {
+  TWSR = 0;
+  TWBR = 72;             /* (16e6/100e3 - 16)/2 = 72 */
+  TWCR = (1 << TWEN);
+}
+
+static bool i2c_start(uint8_t addr_rw) {
+  TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
+  while (!(TWCR & (1 << TWINT))) {}
+  if ((TWSR & 0xF8) != 0x08 && (TWSR & 0xF8) != 0x10) return false;
+  TWDR = addr_rw;
+  TWCR = (1 << TWINT) | (1 << TWEN);
+  while (!(TWCR & (1 << TWINT))) {}
+  uint8_t st = TWSR & 0xF8;
+  return (st == 0x18 || st == 0x40 || st == 0x20 || st == 0x48);
+}
+
+static void i2c_stop(void) {
+  TWCR = (1 << TWINT) | (1 << TWSTO) | (1 << TWEN);
+  while (TWCR & (1 << TWSTO)) {}
+}
+
+static bool i2c_write(uint8_t b) {
+  TWDR = b;
+  TWCR = (1 << TWINT) | (1 << TWEN);
+  while (!(TWCR & (1 << TWINT))) {}
+  return (TWSR & 0xF8) == 0x28;
+}
+
+static uint8_t i2c_read_ack(bool ack) {
+  TWCR = (1 << TWINT) | (1 << TWEN) | (ack ? (1 << TWEA) : 0);
+  while (!(TWCR & (1 << TWINT))) {}
+  return TWDR;
+}
+
+static bool i2cDevice(uint8_t address) {
+  if (!i2c_start((address << 1) | 0)) { i2c_stop(); return false; }
+  i2c_stop();
+  return true;
+}
+
+static void i2cWrite8(uint8_t address, uint8_t reg, uint8_t value) {
+  i2c_start((address << 1) | 0);
+  i2c_write(reg);
+  i2c_write(value);
+  i2c_stop();
+}
+
+static bool i2cRead(uint8_t address, uint8_t reg, uint8_t *data, uint8_t count) {
+  if (!i2c_start((address << 1) | 0)) { i2c_stop(); return false; }
+  if (!i2c_write(reg)) { i2c_stop(); return false; }
+  if (!i2c_start((address << 1) | 1)) { i2c_stop(); return false; }
+  for (uint8_t i = 0; i < count; ++i) {
+    data[i] = i2c_read_ack(i < (count - 1));
+  }
+  i2c_stop();
+  return true;
+}
+
+/* =====================================================================
+   MPU6050 / MAX30102
+   ===================================================================== */
+static void initMPU(void) {
+  mpuPresent = i2cDevice(MPU_ADDR);
+  if (!mpuPresent) return;
+  i2cWrite8(MPU_ADDR, 0x6B, 0x00);
+  i2cWrite8(MPU_ADDR, 0x1C, 0x00);
+  i2cWrite8(MPU_ADDR, 0x1A, 0x03);
+  i2cWrite8(MPU_ADDR, 0x38, 0x40);
+}
+
+static void initMAX30102(void) {
+  maxPresent = i2cDevice(MAX_ADDR);
+  if (!maxPresent) return;
+  i2cWrite8(MAX_ADDR, 0x09, 0x40);
+  _delay_ms(10);
+  i2cWrite8(MAX_ADDR, 0x08, 0x4F);
+  i2cWrite8(MAX_ADDR, 0x09, 0x03);
+  i2cWrite8(MAX_ADDR, 0x0A, 0x27);
+  i2cWrite8(MAX_ADDR, 0x0C, 0x24);
+  i2cWrite8(MAX_ADDR, 0x0D, 0x24);
+  i2cWrite8(MAX_ADDR, 0x02, 0xC0);
+}
+
+static bool readMPU(int16_t *ax, int16_t *ay, int16_t *az) {
+  uint8_t b[6];
+  if (!mpuPresent || !i2cRead(MPU_ADDR, 0x3B, b, 6)) return false;
+  *ax = (int16_t)((b[0] << 8) | b[1]);
+  *ay = (int16_t)((b[2] << 8) | b[3]);
+  *az = (int16_t)((b[4] << 8) | b[5]);
+  return true;
+}
+
+static bool readMAXIR(uint32_t *ir) {
+  uint8_t p[3];
+  if (!maxPresent || !i2cRead(MAX_ADDR, 0x07, p, 3)) return false;
+  *ir = (((uint32_t)p[0] << 16) | ((uint32_t)p[1] << 8) | p[2]) & 0x3FFFF;
+  return true;
+}
+
+/* =====================================================================
+   ADC (battery)
+   ===================================================================== */
+static void adc_init(void) {
+  ADMUX  = (1 << REFS0);   /* AVcc ref (change to REFS1|REFS0 for 1.1V) */
+  ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0); /* /128 */
+}
+
+static uint16_t adc_read(uint8_t ch) {
+  ADMUX = (ADMUX & 0xF0) | (ch & 0x0F);
+  ADCSRA |= (1 << ADSC);
+  while (ADCSRA & (1 << ADSC)) {}
+  return ADC;
+}
+
+static uint16_t readBatteryMillivolts(void) {
+  /* Internal 1.1V ref */
+  ADMUX = (1 << REFS1) | (1 << REFS0);
+  _delay_ms(3);
+  adc_read(0);
+  uint32_t total = 0;
+  for (uint8_t i = 0; i < 8; ++i) total += adc_read(0);
+  float adc = total / 8.0f;
+  return (uint16_t)(adc * 1100.0f / 1023.0f / 0.248f);
+}
+
+/* =====================================================================
+   Strap / worn detection
+   ===================================================================== */
+static bool readStrapClosed(void) {
+  return (PINC & (1 << PC2)) == 0;   /* A2 low -> closed */
+}
+
+/* =====================================================================
+   Outputs
+   ===================================================================== */
+static void pulseOutputs(uint16_t ms) {
+  PORTB |= (1 << PIN_BUZ) | (1 << PIN_VIB);
+  for (uint16_t i = 0; i < ms; ++i) _delay_ms(1);
+  PORTB &= ~((1 << PIN_BUZ) | (1 << PIN_VIB));
+}
+
+/* =====================================================================
+   Modem (SIM800L) over UART0
+   ===================================================================== */
+static bool modemCommand(const char *command, const char *expected, uint16_t timeoutMs) {
+  while (uart0_available()) (void)UDR0;
+  uart0_puts(command);
+  uart0_puts("\r\n");
+
+  uint32_t start = millis();
+  char response[128];
+  uint8_t used = 0;
+  response[0] = '\0';
+
+  while ((millis() - start) < timeoutMs) {
+    while (uart0_available()) {
+      char c = UDR0;
+      if (used < sizeof(response) - 1) {
+        response[used++] = c;
+        response[used] = '\0';
+      }
+      if (strstr(response, expected)) return true;
+    }
+  }
+  return false;
+}
+
+static bool waitModemResponse(const char *expected, uint16_t timeoutMs) {
+  uint32_t start = millis();
+  char response[128];
+  uint8_t used = 0;
+  response[0] = '\0';
+  while ((millis() - start) < timeoutMs) {
+    while (uart0_available()) {
+      char c = UDR0;
+      if (used < sizeof(response) - 1) {
+        response[used++] = c;
+        response[used] = '\0';
+      }
+      if (strstr(response, expected)) return true;
+    }
+  }
+  return false;
+}
+
+static bool initModem(void) {
+  bool seen = false;
+  for (uint8_t i = 0; i < 5 && !seen; ++i) {
+    seen = modemCommand("AT", "OK", 1200);
+    _delay_ms(300);
+  }
+  if (!seen) return false;
+  modemCommand("ATE0", "OK", 1500);
+  modemCommand("AT+CMGF=1", "OK", 1500);
+  return true;
+}
+
+static bool sendSOSSMS(void) {
+  if (!modemReady || ORGANIZER_PHONE[0] == '\0') return false;
+  if (!modemCommand("AT+CMGF=1", "OK", 1500)) return false;
+
+  char cmd[48];
+  snprintf(cmd, sizeof(cmd), "AT+CMGS=\"%s\"", ORGANIZER_PHONE);
+  if (!modemCommand(cmd, ">", 5000)) return false;
+
+  uart0_puts("SAFE LINK SOS; last GPS: ");
+  if (gpsFix) {
+    char buf[40];
+    snprintf(buf, sizeof(buf), "%.6f,%.6f", latitude, longitude);
+    uart0_puts(buf);
+  } else {
+    uart0_puts("no fix");
+  }
+  uart0_putc(26);   /* Ctrl-Z */
+  return waitModemResponse("OK", 15000);
+}
+
+/* =====================================================================
+   NMEA parsing
+   ===================================================================== */
+static bool parseCoordinate(const char *field, char hemisphere, float *result) {
+  if (!field || !field[0]) return false;
+  float raw = atof(field);
+  int degrees = (int)(raw / 100.0f);
+  float minutes = raw - degrees * 100.0f;
+  *result = degrees + minutes / 60.0f;
+  if (hemisphere == 'S' || hemisphere == 'W') *result = -*result;
+  return true;
+}
+
+static void parseNMEA(char *line) {
+  if (!(strstr(line, "$GPRMC") == line || strstr(line, "$GNRMC") == line)) return;
+  char copy[96];
+  strncpy(copy, line, sizeof(copy) - 1);
+  copy[sizeof(copy) - 1] = '\0';
+
+  char *fields[12];
+  uint8_t n = 0;
+  char *p = strtok(copy, ",");
+  while (p && n < 12) { fields[n++] = p; p = strtok(NULL, ","); }
+  if (n < 7 || fields[2][0] != 'A') { gpsFix = false; return; }
+
+  float lat, lon;
+  if (parseCoordinate(fields[3], fields[4][0], &lat) &&
+      parseCoordinate(fields[5], fields[6][0], &lon)) {
+    latitude  = lat;
+    longitude = lon;
+    gpsFix    = true;
+    lastGpsMs = millis();
+  }
+}
+
+static void pollGPS(void) {
+  char c;
+  while (soft_uart_getc(&c)) {
+    if (c == '\r') continue;
+    if (c == '\n') {
+      nmeaLine[nmeaPos] = '\0';
+      if (nmeaPos) parseNMEA(nmeaLine);
+      nmeaPos = 0;
+    } else if (nmeaPos < sizeof(nmeaLine) - 1) {
+      nmeaLine[nmeaPos++] = c;
+    } else {
+      nmeaPos = 0;
+    }
+  }
+  soft_uart_poll();
+
+  if ((millis() - lastGpsMs) > 5000) gpsFix = false;
+}
+
+/* =====================================================================
+   Status
+   ===================================================================== */
+static void showStatus(void) {
+  int16_t ax = 0, ay = 0, az = 0;
+  uint32_t ir = 0;
+  bool haveMotion = readMPU(&ax, &ay, &az);
+  bool havePulseSensor = readMAXIR(&ir);
+  uint16_t vbatt = readBatteryMillivolts();
+  bool worn = readStrapClosed();
+
+  if (worn && vbatt > 3300) PORTB |=  (1 << PIN_LED);
+  else                      PORTB &= ~(1 << PIN_LED);
+
+  if (haveMotion &&
+      (abs(ax) > 18000 || abs(ay) > 18000 || abs(az) > 25000)) {
+    motionPending = true;
+  }
+  (void)havePulseSensor;
+  (void)ir;
+  (void)gpsFix;
+}
+
+/* =====================================================================
+   ISRs for SOS and IMU INT
+   ===================================================================== */
+ISR(INT0_vect) { motionPending = true; }   /* PD2 rising  */
+ISR(INT1_vect) { sosPending    = true; }   /* PD3 falling */
+
+static void ext_int_init(void) {
+  /* PD2 -> INT0, rising */
+  EICRA |= (1 << ISC01) | (1 << ISC00);
+  EIMSK |= (1 << INT0);
+
+  /* PD3 -> INT1, falling */
+  EICRA |= (1 << ISC11);
+  EICRA &= ~(1 << ISC10);
+  EIMSK |= (1 << INT1);
+}
+
+/* =====================================================================
+   setup / loop
+   ===================================================================== */
+static void setup(void) {
+  /* Outputs */
+  DDRB |= (1 << PIN_VIB) | (1 << PIN_BUZ) | (1 << PIN_LED);
+  DDRD |= (1 << PIN_GPS_EN);
+  DDRD &= ~((1 << PIN_SOS) | (1 << PIN_IMU_INT) | (1 << PIN_HR_INT) |
+            (1 << PIN_SIM_RST) | (1 << PIN_GPS_RX));
+
+  /* SOS input pull-up, strap A2 input no pull-up */
+  PORTD |= (1 << PIN_SOS);
+  DDRC &= ~((1 << PC2) | (1 << PC0) | (1 << PC1));
+
+  /* Init all peripherals */
+  timer0_init();
+  uart0_init();
+  soft_uart_rx_init();
+  i2c_init();
+  adc_init();
+  ext_int_init();
+
+  /* Startup outputs */
+  PORTB &= ~((1 << PIN_LED) | (1 << PIN_BUZ) | (1 << PIN_VIB));
+  PORTD |=  (1 << PIN_GPS_EN);   /* GPS on */
+
+  initMPU();
+  initMAX30102();
+  modemReady = initModem();
+
+  sei();   /* global interrupts on */
+
+  /* Two short beeps */
+  pulseOutputs(120);
+  _delay_ms(100);
+  pulseOutputs(120);
+}
+
+int main(void) {
+  setup();
+
+  for (;;) {
+    pollGPS();
+
+    if (sosPending) {
+      sosPending = false;
+      uint32_t pressedAt = millis();
+      while ((PIND & (1 << PIN_SOS)) == 0 && (millis() - pressedAt) < 1800) {
+        pollGPS();
+      }
+      if ((millis() - pressedAt) >= 1500) {
+        pulseOutputs(500);
+        sendSOSSMS();
+      }
+    }
+
+    if (motionPending) {
+      motionPending = false;
+      PORTB ^= (1 << PIN_LED);
+    }
+
+    if ((millis() - lastReportMs) >= 1000) {
+      lastReportMs = millis();
+      showStatus();
+    }
+  }
+}
