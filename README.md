@@ -16,8 +16,11 @@ SAFE_LINK gives a small organizing team (camp staff, trip leaders, coaches) the 
 - [Overview](#overview)
 - [Project Status](#project-status)
 - [Key Features](#key-features)
+- [Dashboard Status and Local Run](#dashboard-status-and-local-run)
 - [System Architecture](#system-architecture)
 - [Hardware](#hardware)
+- [Firmware](#firmware)
+- [Enclosure](#enclosure)
 - [Tech Stack](#tech-stack)
 - [Repository Structure](#repository-structure)
 - [Getting Started](#getting-started)
@@ -26,6 +29,7 @@ SAFE_LINK gives a small organizing team (camp staff, trip leaders, coaches) the 
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [License](#license)
+- [Licensing note](#licensing-note)
 
 ---
 
@@ -37,17 +41,16 @@ The system is built around one principle: convert raw telemetry (location, motio
 
 ## Project Status
 
-SAFE_LINK has not yet reached a working prototype. The following workstreams are active **in parallel**:
+SAFE_LINK has not yet reached a working prototype. Design work is complete across all workstreams; the next step is building and testing hardware.
 
 | Workstream | Status |
 |---|---|
-| Documentation | ✔ In progress |
-| Organizer dashboard | ✔ Done First phase build |
-| Schematic | ✔ In progress |
-| Firmware | ✔ In progress |
-| PCB layout | 🔄 In progress |
-| 3D enclosure design | 🔄 In progress |
-
+| Documentation | ✔ Done |
+| Organizer dashboard | ✔ Done (first phase build) |
+| Schematic | ✔ Done |
+| Firmware (`src/`) | ✔ Done |
+| PCB layout | ✔ Done |
+| 3D enclosure design | ✔ Done |
 | Testing / prototyping | 🔄 In progress |
 
 See [Roadmap](#roadmap) for how these workstreams lead to a finished product, not just a working prototype.
@@ -167,32 +170,72 @@ ORGANIZER DASHBOARD
 
 ## Hardware
 
-The reference schematic in (`hardware/`) adapts a design originally created for a **military wearable**, retargeted here for civilian group/camp-safety use. See [Setting Up This Project](#setting-up-this-project) below (in the chat response) for a note on licensing reused hardware designs.
-For the constrain of the project from SMD prohibition to space constraints, lots of trades of has been made designing both the schematics and PCB. **UPTO DATE SCHEMATICS UNDER** (hardware\Schematic_SAFELINK_carrier_2026-10-11); Divided into three schematics, MCU, POWER and PERIPHERALS.
+The reference schematic in `hardware/` adapts a design originally created for a **military wearable**, retargeted here for civilian group/camp-safety use. See the [Licensing note](#licensing-note) below for reused hardware designs.
 
+**Project constraint:** the wearable was designed without SMD parts, which meant through-hole components and ready-made breakout modules (SIM800L, NEO-6M, MPU6050, MAX30102, TP4056). The first plan was a single-layer board; the final carrier PCB is a **two-layer, 90 × 60 mm** board because the single-layer routing needed too many wire jumpers. Several trade-offs between size, parts availability and routability follow from this.
+
+**Current design files** (in `hardware/`):
+
+- Schematic: `Schematic_SAFELINK_carrier_2026-10-11`, split into three sheets: **MCU**, **Power** and **Peripherals**.
+- PCB layout: carrier board exports dated 2026-10-18 (two layers).
 
 | Component | Part | Function |
 |---|---|---|
-| Microcontroller | ATmega328P-PN | Core processing and firmware execution |
-| Cellular connectivity | SIM800L (GSM/GPRS) | Sends telemetry/alerts to the backend over the cell network |
-| GPS | u-blox NEO-6M (via onboard header) | Location fix |
-| Motion sensing | MPU6050 (6-axis accelerometer + gyroscope) | Movement classification, fall-pattern detection |
-| Heart rate | MAX30102 (PPG) | Supporting physiological signal only |
-| Battery charging | TP4056 (USB-C input) | Li-ion charge management |
-| Voltage regulation | MCP1700-1802E | Regulated supply rail |
-| Emergency input | Tactile SOS button + 1 kΩ pull resistor | Manual emergency trigger |
-| Local feedback | Piezo buzzer | Audible alert |
-| Antennas | 2× MMCX connectors | External GSM and GPS antennas |
-| Programming header | USBasp / ISP | Firmware flashing |
+| Microcontroller | ATmega328P-PU / PN (DIP-28 in a socket), 8 MHz HC-49S crystal | Core processing and firmware execution (runs at 3.3 V, so 8 MHz) |
+| Cellular connectivity | SIM800L breakout (2G GSM/GPRS) with FPC antenna | Sends telemetry/alerts to the backend over the cell network |
+| GPS | u-blox NEO-6M breakout (patch antenna) | Location fix, powered through a BC337/BC327 high-side switch |
+| Motion sensing | MPU6050 on a GY-521 board | Movement classification, fall-pattern detection |
+| Heart rate | MAX30102 breakout (PPG), on a cable to the skin-side window | Supporting physiological signal only |
+| Battery charging | TP4056 module with protection (USB-C input) | Li-ion charge management |
+| Voltage regulation | MCP1700-3302E (TO-92) | 3.3 V rail for the MCU and sensors |
+| Power switch | Toggle switch rated 3 A or more | Main on/off |
+| Emergency input | Tactile SOS button, 10 kΩ pull-up, 100 nF debounce | Manual emergency trigger (wakes the MCU from sleep) |
+| Local feedback | 12 mm active buzzer, coin vibration motor | Audible and haptic alert, driven by BC337 transistors |
+| Wearable integrity | Two-wire strap loop with 1 MΩ pull-up | Detects the strap being opened |
+| Programming header | 2×3 ISP header (USBasp) | Firmware flashing — set the USBasp jumper to 3.3 V |
 
-**Note:** the SIM800L requires an active SIM card with SMS and/or GPRS data enabled, and correct APN configuration for your carrier, to communicate with the backend.
+**Notes:**
+
+- The SIM800L requires an active SIM card with GPRS data enabled and the correct APN for your carrier to communicate with the backend. It sits on the battery rail (3.4–4.4 V) with bulk capacitors beside its header.
+- The SIM800L cannot reliably do modern TLS, so the device is intended to send signed payloads over plain HTTP to the project's own ingestion endpoint.
+- Fuse settings for the ATmega328P (external 8 MHz crystal, brown-out 2.7 V): `lfuse=0xFF hfuse=0xD9 efuse=0xFD`. Check them with a fuse calculator before burning.
+
+## Firmware
+
+The firmware lives in `src/` and is a PlatformIO project (Arduino framework) for the ATmega328P at 8 MHz.
+
+- `pins.h` — pin map for the carrier board.
+- `main.cpp` — startup, SOS and IMU interrupts, battery reading, GPS power switch, buzzer and vibration helpers, and SIM800L initialisation.
+- `platformio.ini` — board `pro8MHzatmega328`, USBasp upload, fuse values, library list.
+
+| Signal | Pin | Signal | Pin |
+|---|---|---|---|
+| SIM800L UART | PD0 / PD1 | Buzzer | PB1 |
+| SIM800L reset | PD4 | Vibration motor | PB0 |
+| IMU interrupt | PD2 | Status LED | PB2 |
+| SOS button | PD3 | Battery sense | PC0 |
+| GPS serial in | PD5 | USB-present sense | PC1 |
+| GPS power enable | PD6 | Strap loop | PC2 |
+| Heart-rate interrupt | PD7 | I2C (IMU, HR) | PC4 / PC5 |
+
+## Enclosure
+
+The enclosure design is in `enclosure/`: a base, a lid and a printed SOS plunger for the 90 × 60 mm carrier board, closed with four M2.5 screws. Three versions are provided:
+
+| Version | Use |
+|---|---|
+| A | Armband: strap lugs on the front and back walls |
+| B | Backpack strap / belt: two strap bars under the floor and a lanyard tab |
+| C | Demo bench: large lid window and rubber feet |
+
+Case size is about 105 × 75 × 28.4 mm (38 mm with the GPS dome). `SAFE_LINK_Enclosure_Design.pdf` has renders and dimensioned drawings; the STL files for each part and a full assembly are included for printing (PETG or ASA recommended).
 
 ## Tech Stack
 
-- **Firmware:** C, AVR-GCC toolchain
+- **Firmware:** C/C++ (Arduino framework on PlatformIO, AVR toolchain)
 - **Simulation:** Proteus
 - **Schematic & PCB:** EasyEDA
-- **Enclosure:** 3D design software (CAD, TBD)
+- **Enclosure:** STL models and PDF drawings
 - **Version control:** Git / GitHub
 - **Monitoring:** Web dashboard
 
@@ -200,11 +243,11 @@ For the constrain of the project from SMD prohibition to space constraints, lots
 
 ```
 SAFE_LINK/
-│── src/          # Firmware source (C, AVR-GCC/Platform IO)
+│── src/          # Firmware source (PlatformIO / Arduino framework)
 │── docs/         # Documentation, diagrams, the project proposal
 │── hardware/     # Schematics and PCB layouts (EasyEDA)
 │── simulation/   # Proteus simulation files
-│── dashboard/   # React web app dashboard
+│── dashboard/    # React web app dashboard
 │── enclosure/    # 3D enclosure design files
 │── tests/        # Test scripts and validation records
 │── README.md
@@ -216,32 +259,36 @@ SAFE_LINK/
 
 ### Prerequisites
 
-```bash
-sudo apt install gcc-avr avr-libc avrdude
-```
-
-You'll also need [Proteus](https://www.labcenter.com/) and [EasyEDA](https://easyeda.com/) (or its desktop client) for simulation and hardware design work.
+- [PlatformIO](https://platformio.org/) (VS Code extension or CLI)
+- A USBasp programmer (set to 3.3 V) or another AVR ISP programmer
+- Optional: `avrdude` for flashing a built `.hex` directly
+- [Proteus](https://www.labcenter.com/) and [EasyEDA](https://easyeda.com/) (or its desktop client) for simulation and hardware design work
 
 ### Clone the repository
 
 ```bash
 git clone https://github.com/<your-org-or-username>/SAFE_LINK.git
-cd SAFE_LINK/src
+cd SAFE_LINK
 ```
 
 ### Build the firmware
 
 ```bash
-avr-gcc -mmcu=atmega328p -DF_CPU=16000000UL -Os -o main.elf main.c
-avr-objcopy -O ihex -R .eeprom main.elf main.hex
+pio run
 ```
 
-> Adjust `-DF_CPU` to match your board's actual clock source. As firmware grows to include GSM, GPS, IMU, and HR drivers, moving to a `Makefile` is strongly recommended over a single manual command.
+`platformio.ini` must sit in the project root with the sources in `src/`. The target is an 8 MHz ATmega328P; 16 MHz is out of spec at 3.3 V.
 
 ### Flash to the microcontroller (via USBasp)
 
 ```bash
-avrdude -c usbasp -p m328p -U flash:w:main.hex
+pio run -t upload
+```
+
+Or flash a built hex with `avrdude`:
+
+```bash
+avrdude -c usbasp -p m328p -U flash:w:.pio/build/safelink/firmware.hex
 ```
 
 ### Simulation and hardware design
@@ -255,7 +302,7 @@ Work is organized by branch, merged into `main` via pull request:
 | Branch | Scope |
 |---|---|
 | `hardware-dev` | Schematic and PCB design (EasyEDA) |
-| `firmware-dev` | Firmware (AVR-GCC) |
+| `firmware-dev` | Firmware (PlatformIO) |
 | `dashboard-dev` | Organizer dashboard (web) |
 | `simulation` | Proteus simulation files |
 | `enclosure` | 3D enclosure design |
@@ -263,17 +310,17 @@ Work is organized by branch, merged into `main` via pull request:
 
 ## Roadmap
 
-### Phase 0 — Concept & Design *(current)*
+### Phase 0 — Concept & Design *(complete)*
 - [x] Problem definition, feature specification, and system design proposal
 - [x] ✔ Firmware architecture and initial drivers
 - [x] ✔ Reference schematic and component selection
-- [ ] 🔄 PCB layout
-- [ ] 🔄 3D enclosure design
+- [x] ✔ PCB layout
+- [x] ✔ 3D enclosure design
 - [x] ✔ Organizer dashboard
 - [x] ✔ Project documentation
 - [x] ✔ Dashboard design and development
 
-### Phase 1 — First Hardware Prototype
+### Phase 1 — First Hardware Prototype *(next)*
 - [ ] Bring up each subsystem individually (GPS fix, GSM link, IMU, HR sensor, charging)
 - [ ] Assemble first integrated prototype unit
 - [ ] Firmware MVP: sensor sampling, core alert logic, GSM reporting
@@ -301,7 +348,7 @@ Work is organized by branch, merged into `main` via pull request:
 
 ## Documentation
 
-The full system design — problem statement, all 11 features analyzed in detail, dashboard design, architecture, alert logic, risks, and testing plan — lives in `docs/` as the project proposal. Start there for the reasoning behind any design decision referenced in this README.
+The full system design — problem statement, all 11 features analyzed in detail, dashboard design, architecture, alert logic, risks, and testing plan — lives in `docs/` as the project proposal. Start there for the reasoning behind any design decision referenced in this README. Hardware drawings are in `hardware/` and the enclosure drawings are in `enclosure/`.
 
 ## Contributing
 
@@ -313,4 +360,6 @@ The full system design — problem statement, all 11 features analyzed in detail
 
 This project is licensed under the MIT License. See [`LICENSE`](LICENSE) for details.
 
-*Note: MIT covers the software/firmware in this repository. Hardware designs adapted from third-party reference schematics may carry separate terms — see the licensing note in* [Setting Up This Project](#setting-up-this-project)*.*
+## Licensing note
+
+MIT covers the software and firmware in this repository. Hardware designs adapted from third-party reference schematics (see [Hardware](#hardware)) may carry separate terms.
