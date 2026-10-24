@@ -202,11 +202,15 @@ The reference schematic in `hardware/` adapts a design originally created for a 
 
 ## Firmware
 
-The firmware lives in `src/` and is a PlatformIO project (Arduino framework) for the ATmega328P at 8 MHz.
+The firmware lives in `src/` and is a PlatformIO project (Arduino framework) for the ATmega328P at 8 MHz. `platformio.ini` sits in the repository root. Full details, the report format and the bring-up order are in `docs/FIRMWARE.md`.
 
+- `config.h` — device ID, APN, server address, HMAC key, intervals and thresholds (edit per device).
 - `pins.h` — pin map for the carrier board.
-- `main.cpp` — startup, SOS and IMU interrupts, battery reading, GPS power switch, buzzer and vibration helpers, and SIM800L initialisation.
-- `platformio.ini` — board `pro8MHzatmega328`, USBasp upload, fuse values, library list.
+- `main.cpp` — SOS, fall, strap, battery and report logic, retries, sleep.
+- `power.*`, `imu.*`, `hr.*`, `gps.*`, `modem.*` — drivers for power/sleep, MPU6050, MAX30102, NEO-6M and SIM800L.
+- `store.*`, `report.*`, `sha256.*` — EEPROM event queue, JSON report and HMAC-SHA256 signature.
+- `tools/mock_ingest_server.js` — bench server that checks the signature and acknowledges reports.
+- `test/host/` — PC tests for the signing, GPS parsing, payload and EEPROM queue.
 
 | Signal | Pin | Signal | Pin |
 |---|---|---|---|
